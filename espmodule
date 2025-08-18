@@ -10,9 +10,10 @@ Player = Players.LocalPlayer
 ActiveESP = {}
 ESPEnabled = false
 ESPConnection = nil
+CurrentConfig = nil
 
 local function IsPlayerFriend(character)
-    if not getgenv().config.Friends.Enabled then return false end
+    if not CurrentConfig.Friends.Enabled then return false end
     
     local player = Players:GetPlayerFromCharacter(character)
     if player then
@@ -26,11 +27,11 @@ end
 
 local function GetHealthColor(health)
     if health > 75 then
-        return getgenv().config.HealthColors.High
+        return CurrentConfig.HealthColors.High
     elseif health > 50 then
-        return getgenv().config.HealthColors.Medium
+        return CurrentConfig.HealthColors.Medium
     else
-        return getgenv().config.HealthColors.Low
+        return CurrentConfig.HealthColors.Low
     end
 end
 
@@ -42,20 +43,32 @@ local function GetTeamColor(character)
     return Color3.fromRGB(255, 255, 255)
 end
 
+local function GetDistance(character)
+    if not Player.Character then return 0 end
+    
+    local playerRoot = Player.Character:FindFirstChild("HumanoidRootPart")
+    local targetRoot = character:FindFirstChild("HumanoidRootPart")
+    
+    if playerRoot and targetRoot then
+        return math.floor((playerRoot.Position - targetRoot.Position).Magnitude)
+    end
+    return 0
+end
+
 local function GetESPColor(character)
     if IsPlayerFriend(character) then
-        return getgenv().config.Friends.Color
+        return CurrentConfig.Friends.Color
     end
     
-    if getgenv().config.Highlight.ColorMode == 'health' then
+    if CurrentConfig.Highlight.ColorMode == 'health' then
         local humanoid = character:FindFirstChild("Humanoid")
         if humanoid then
             return GetHealthColor(humanoid.Health)
         end
-    elseif getgenv().config.Highlight.ColorMode == 'team' then
+    elseif CurrentConfig.Highlight.ColorMode == 'team' then
         return GetTeamColor(character)
     end
-    return getgenv().config.Highlight.StaticColor
+    return CurrentConfig.Highlight.StaticColor
 end
 
 local function CreateESPText(character)
@@ -64,35 +77,28 @@ local function CreateESPText(character)
     
     local parts = {}
     
-    if getgenv().config.Text.ShowName then
+    if CurrentConfig.Text.ShowName then
         table.insert(parts, player.Name)
     end
     
-    if getgenv().config.Text.ShowHealth then
+    if CurrentConfig.Text.ShowHealth then
         local humanoid = character:FindFirstChild("Humanoid")
         if humanoid then
             table.insert(parts, "HP: " .. math.floor(humanoid.Health))
         end
     end
     
-    if getgenv().config.Text.ShowTeam then
-        local teamName = player.Team and player.Team.Name or "None"
-        table.insert(parts, "Team: " .. teamName)
+    if CurrentConfig.Text.ShowStuds then
+        local distance = GetDistance(character)
+        table.insert(parts, "Studs: " .. distance)
     end
     
     return table.concat(parts, " | ")
 end
 
 local function ShouldShowESP(character)
-    if getgenv().config.ExcludeSelf and character == Player.Character then
+    if CurrentConfig.ExcludeSelf and character == Player.Character then
         return false
-    end
-    
-    if getgenv().config.ExcludeTeam and Player.Team then
-        local player = Players:GetPlayerFromCharacter(character)
-        if player and player.Team == Player.Team then
-            return false
-        end
     end
     
     return true
@@ -102,16 +108,25 @@ local function UpdateESP(character)
     if not ActiveESP[character] then return end
     
     local espData = ActiveESP[character]
-    local color = GetESPColor(character)
     
     if espData.highlight then
-        espData.highlight.FillColor = color
-        espData.highlight.OutlineColor = color
+        if CurrentConfig.Highlight.ColorMode == 'team' then
+            espData.highlight.FillColor = GetTeamColor(character)
+            espData.highlight.OutlineColor = GetTeamColor(character)
+        else
+            local color = GetESPColor(character)
+            espData.highlight.FillColor = color
+            espData.highlight.OutlineColor = color
+        end
     end
     
     if espData.textLabel then
         espData.textLabel.Text = CreateESPText(character)
-        espData.textLabel.TextColor3 = color
+        if CurrentConfig.Highlight.ColorMode == 'team' then
+            espData.textLabel.TextColor3 = GetTeamColor(character)
+        else
+            espData.textLabel.TextColor3 = GetESPColor(character)
+        end
     end
 end
 
@@ -129,14 +144,14 @@ local function CreateESP(character)
     
     local highlight, billboardGui, textLabel
     
-    if getgenv().config.Highlight.Enabled then
+    if CurrentConfig.Highlight.Enabled then
         highlight = Instance.new("Highlight")
         highlight.Parent = character
-        highlight.FillTransparency = getgenv().config.Highlight.FillTransparency
-        highlight.OutlineTransparency = getgenv().config.Highlight.OutlineTransparency
+        highlight.FillTransparency = CurrentConfig.Highlight.FillTransparency
+        highlight.OutlineTransparency = CurrentConfig.Highlight.OutlineTransparency
     end
     
-    if getgenv().config.Text.Enabled then
+    if CurrentConfig.Text.Enabled then
         billboardGui = Instance.new("BillboardGui")
         billboardGui.Parent = character
         billboardGui.Adornee = humanoidRootPart
@@ -148,7 +163,7 @@ local function CreateESP(character)
         textLabel.Parent = billboardGui
         textLabel.BackgroundTransparency = 1
         textLabel.Size = UDim2.new(1, 0, 1, 0)
-        textLabel.TextSize = getgenv().config.Text.Size
+        textLabel.TextSize = CurrentConfig.Text.Size
         textLabel.TextStrokeTransparency = 0
         textLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
         textLabel.Font = Enum.Font.GothamBold
@@ -156,14 +171,14 @@ local function CreateESP(character)
     
     local connections = {}
     
-    if humanoid then
+    if humanoid and CurrentConfig.Highlight.ColorMode == 'health' then
         connections.healthChanged = humanoid.HealthChanged:Connect(function()
             UpdateESP(character)
         end)
     end
     
     local player = Players:GetPlayerFromCharacter(character)
-    if player then
+    if player and CurrentConfig.Highlight.ColorMode == 'team' then
         connections.teamChanged = player:GetPropertyChangedSignal("Team"):Connect(function()
             UpdateESP(character)
         end)
@@ -174,6 +189,14 @@ local function CreateESP(character)
             RemoveESP(character)
         end
     end)
+    
+    if CurrentConfig.Text.ShowStuds then
+        connections.distanceUpdate = RunService.Heartbeat:Connect(function()
+            if ActiveESP[character] and ActiveESP[character].textLabel then
+                UpdateESP(character)
+            end
+        end)
+    end
     
     ActiveESP[character] = {
         highlight = highlight,
@@ -223,8 +246,9 @@ local function SetupPlayer(player)
     end)
 end
 
-local function ToggleESP(State)
+local function ToggleESP(State, Config)
     ESPEnabled = State
+    CurrentConfig = Config or getgenv().config
     
     if State then
         for _, player in pairs(Players:GetPlayers()) do
